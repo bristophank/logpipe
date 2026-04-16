@@ -5,52 +5,47 @@ import (
 	"io"
 
 	"github.com/user/logpipe/internal/filter"
+	"github.com/user/logpipe/internal/metrics"
 	"github.com/user/logpipe/internal/router"
 )
 
-// Config holds pipeline configuration.
-type Config struct {
-	SinkName string
-	Rules    []filter.Rule
-}
-
-// Pipeline ties a filter and router together, reading from a source.
+// Pipeline reads lines from a reader, filters them, and routes matches.
 type Pipeline struct {
-	filter *filter.Filter
-	router *router.Router
-	cfg    Config
+	filter    *filter.Filter
+	router    *router.Router
+	metrics   *metrics.Collector
 }
 
-// New creates a Pipeline with the given filter rules and router.
-func New(cfg Config, r *router.Router) (*Pipeline, error) {
-	f, err := filter.New(cfg.Rules)
-	if err != nil {
-		return nil, err
+// New creates a Pipeline with the given filter, router, and metrics collector.
+func New(f *filter.Filter, r *router.Router, m *metrics.Collector) *Pipeline {
+	if m == nil {
+		m = metrics.New()
 	}
-	return &Pipeline{filter: f, router: r, cfg: cfg}, nil
+	return &Pipeline{filter: f, router: r, metrics: m}
 }
 
-// Run reads lines from src, applies filter rules, and routes matching lines.
+// Run reads from src line by line until EOF or error.
 func (p *Pipeline) Run(src io.Reader) error {
 	scanner := bufio.NewScanner(src)
 	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
+		line := scanner.Text()
+		if line == "" {
 			continue
 		}
-		ok, err := p.filter.Match(line)
-		if err != nil || !ok {
+		p.metrics.IncIn()
+		if !p.filter.Match(line) {
+			p.metrics.IncDropped()
 			continue
 		}
-		if p.cfg.SinkName != "" {
-			if err := p.router.Route(line, p.cfg.SinkName); err != nil {
-				return err
-			}
-		} else {
-			if err := p.router.Route(line); err != nil {
-				return err
-			}
+		p.metrics.IncMatched()
+		if err := p.router.Route(line); err != nil {
+			p.metrics.IncRouteError()
 		}
 	}
 	return scanner.Err()
+}
+
+// Metrics returns the collector used by this pipeline.
+func (p *Pipeline) Metrics() *metrics.Collector {
+	return p.metrics
 }
