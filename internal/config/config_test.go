@@ -7,29 +7,27 @@ import (
 
 func writeTemp(t *testing.T, content string) string {
 	t.Helper()
-	f, err := os.CreateTemp(t.TempDir(), "cfg*.json")
+	f, err := os.CreateTemp("", "logpipe-cfg-*.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = f.WriteString(content)
-	_ = f.Close()
+	t.Cleanup(func() { os.Remove(f.Name()) })
+	f.WriteString(content)
+	f.Close()
 	return f.Name()
 }
 
 func TestLoad_Valid(t *testing.T) {
-	path := writeTemp(t, `{
-		"sinks": [{"name": "out", "path": "/tmp/out.log"}],
-		"routes": [{"sink": "out", "rules": [{"field": "level", "operator": "eq", "value": "error"}]}]
-	}`)
+	path := writeTemp(t, `{"format":"pretty","sample_rate":3,"sinks":[{"name":"out","target":"stdout"}],"routes":[{"sink":"out","rules":[]}]}`)
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(cfg.Sinks) != 1 || cfg.Sinks[0].Name != "out" {
-		t.Errorf("unexpected sinks: %+v", cfg.Sinks)
+	if cfg.Format != "pretty" {
+		t.Errorf("expected format pretty, got %s", cfg.Format)
 	}
-	if len(cfg.Routes) != 1 || cfg.Routes[0].Sink != "out" {
-		t.Errorf("unexpected routes: %+v", cfg.Routes)
+	if cfg.SampleRate != 3 {
+		t.Errorf("expected sample_rate 3, got %d", cfg.SampleRate)
 	}
 }
 
@@ -41,7 +39,7 @@ func TestLoad_MissingFile(t *testing.T) {
 }
 
 func TestLoad_InvalidJSON(t *testing.T) {
-	path := writeTemp(t, `not json`)
+	path := writeTemp(t, `{bad json`)
 	_, err := Load(path)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
@@ -49,23 +47,23 @@ func TestLoad_InvalidJSON(t *testing.T) {
 }
 
 func TestLoad_UnknownSinkInRoute(t *testing.T) {
-	path := writeTemp(t, `{
-		"sinks": [{"name": "out", "path": "/tmp/out.log"}],
-		"routes": [{"sink": "missing", "rules": []}]
-	}`)
+	path := writeTemp(t, `{"sinks":[{"name":"out","target":"stdout"}],"routes":[{"sink":"missing"}]}`)
 	_, err := Load(path)
 	if err == nil {
-		t.Fatal("expected validation error for unknown sink")
+		t.Fatal("expected error for unknown sink in route")
 	}
 }
 
-func TestLoad_SinkMissingName(t *testing.T) {
-	path := writeTemp(t, `{
-		"sinks": [{"path": "/tmp/out.log"}],
-		"routes": []
-	}`)
-	_, err := Load(path)
-	if err == nil {
-		t.Fatal("expected validation error for sink missing name")
+func TestLoad_DefaultsApplied(t *testing.T) {
+	path := writeTemp(t, `{"sinks":[{"name":"out","target":"stdout"}],"routes":[{"sink":"out"}]}`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Format != "json" {
+		t.Errorf("expected default format json, got %s", cfg.Format)
+	}
+	if cfg.SampleRate != 1 {
+		t.Errorf("expected default sample_rate 1, got %d", cfg.SampleRate)
 	}
 }

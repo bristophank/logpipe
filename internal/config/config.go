@@ -6,32 +6,34 @@ import (
 	"os"
 )
 
-// SinkConfig describes an output destination.
-type SinkConfig struct {
+type Rule struct {
+	Field    string `json:"field"`
+	Operator string `json:"operator"`
+	Value    string `json:"value"`
+}
+
+type Sink struct {
 	Name   string `json:"name"`
-	Type   string `json:"type"` // "stdout", "file"
-	Target string `json:"target,omitempty"`
+	Target string `json:"target"` // "stdout", "stderr", or file path
 }
 
-// RouteConfig maps a filter rule set to a list of sink names.
-type RouteConfig struct {
-	Sinks  []string          `json:"sinks"`
-	Filter map[string]string `json:"filter,omitempty"`
+type Route struct {
+	Sink  string `json:"sink"`
+	Rules []Rule `json:"rules"`
 }
 
-// Config is the top-level configuration structure.
 type Config struct {
-	Sinks   []SinkConfig `json:"sinks"`
-	Routes  []RouteConfig `json:"routes"`
-	RateLimit int         `json:"rate_limit,omitempty"` // lines/sec per sink, 0 = unlimited
-	Format  string       `json:"format,omitempty"`    // json|pretty|text
+	Format     string  `json:"format"`      // json | pretty | text
+	SampleRate uint64  `json:"sample_rate"` // 0/1 = no sampling
+	Sinks      []Sink  `json:"sinks"`
+	Routes     []Route `json:"routes"`
 }
 
-// Load reads and validates a JSON config file at path.
+// Load reads and validates a JSON config file.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("config: read %s: %w", path, err)
+		return nil, fmt.Errorf("config: read %q: %w", path, err)
 	}
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
@@ -42,14 +44,15 @@ func Load(path string) (*Config, error) {
 		sinkNames[s.Name] = true
 	}
 	for _, r := range cfg.Routes {
-		for _, sn := range r.Sinks {
-			if !sinkNames[sn] {
-				return nil, fmt.Errorf("config: route references unknown sink %q", sn)
-			}
+		if !sinkNames[r.Sink] {
+			return nil, fmt.Errorf("config: route references unknown sink %q", r.Sink)
 		}
 	}
 	if cfg.Format == "" {
 		cfg.Format = "json"
+	}
+	if cfg.SampleRate == 0 {
+		cfg.SampleRate = 1
 	}
 	return &cfg, nil
 }
