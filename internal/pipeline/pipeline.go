@@ -1,51 +1,54 @@
 package pipeline
 
 import (
-	"bufio"
-	"io"
-
-	"github.com/user/logpipe/internal/filter"
-	"github.com/user/logpipe/internal/metrics"
-	"github.com/user/logpipe/internal/router"
+	"github.com/yourorg/logpipe/internal/filter"
+	"github.com/yourorg/logpipe/internal/formatter"
+	"github.com/yourorg/logpipe/internal/metrics"
+	"github.com/yourorg/logpipe/internal/ratelimit"
+	"github.com/yourorg/logpipe/internal/router"
 )
 
-// Pipeline reads lines from a reader, filters them, and routes matches.
+// Pipeline wires filter → formatter → rate-limiter → router.
 type Pipeline struct {
 	filter    *filter.Filter
 	router    *router.Router
+	formatter *formatter.Formatter
 	metrics   *metrics.Collector
+	limiter   *ratelimit.Limiter
 }
 
-// New creates a Pipeline with the given filter, router, and metrics collector.
-func New(f *filter.Filter, r *router.Router, m *metrics.Collector) *Pipeline {
-	if m == nil {
-		m = metrics.New()
+// New constructs a Pipeline from its dependencies.
+func New(
+	f *filter.Filter,
+	r *router.Router,
+	fmt *formatter.Formatter,
+	m *metrics.Collector,
+	l *ratelimit.Limiter,
+) *Pipeline {
+	return &Pipeline{filter: f, router: r, formatter: fmt, metrics: m, limiter: l}
+}
+
+// Process handles a single input line.
+func (p *Pipeline) Process(line string) {
+	if line == "" {
+		return
 	}
-	return &Pipeline{filter: f, router: r, metrics: m}
-}
+	p.metrics.IncProcessed()
 
-// Run reads from src line by line until EOF or error.
-func (p *Pipeline) Run(src io.Reader) error {
-	scanner := bufio.NewScanner(src)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			continue
-		}
-		p.metrics.IncIn()
-		if !p.filter.Match(line) {
+	if !p.filter.Match(line) {
+		p.metrics.IncDropped()
+		return
+	}
+
+	formatted := p.formatter.Format(line)
+
+	sinks := p.router.Sinks()
+	for _, name := range sinks {
+		if !p.limiter.Allow(name) {
 			p.metrics.IncDropped()
 			continue
 		}
-		p.metrics.IncMatched()
-		if err := p.router.Route(line); err != nil {
-			p.metrics.IncRouteError()
-		}
+		p.router.Write(name, formatted)
+		p.metrics.IncRouted()
 	}
-	return scanner.Err()
-}
-
-// Metrics returns the collector used by this pipeline.
-func (p *Pipeline) Metrics() *metrics.Collector {
-	return p.metrics
 }
