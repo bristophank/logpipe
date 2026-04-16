@@ -31,16 +31,13 @@ func main() {
 
 	rt := router.New()
 	for _, s := range cfg.Sinks {
-		var w *os.File
-		if s.Type == "file" && s.Target != "" {
-			w, err = os.OpenFile(s.Target, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "logpipe: open sink %s: %v\n", s.Name, err)
-				os.Exit(1)
-			}
+		w, err := openSink(s)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "logpipe: open sink %s: %v\n", s.Name, err)
+			os.Exit(1)
+		}
+		if w != os.Stdout {
 			defer w.Close()
-		} else {
-			w = os.Stdout
 		}
 		rt.Add(s.Name, w)
 	}
@@ -66,4 +63,13 @@ func main() {
 	snap := col.Snapshot()
 	fmt.Fprintf(os.Stderr, "logpipe: processed=%d routed=%d dropped=%d\n",
 		snap.Processed, snap.Routed, snap.Dropped)
+}
+
+// openSink returns the appropriate *os.File for a sink configuration.
+// File sinks are opened for appending; all other sink types fall back to stdout.
+func openSink(s config.Sink) (*os.File, error) {
+	if s.Type == "file" && s.Target != "" {
+		return os.OpenFile(s.Target, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	}
+	return os.Stdout, nil
 }
