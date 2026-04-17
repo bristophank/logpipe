@@ -2,76 +2,73 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
 func writeTemp(t *testing.T, content string) string {
 	t.Helper()
-	f, err := os.CreateTemp("", "logpipe-cfg-*.json")
+	f, err := os.CreateTemp(t.TempDir(), "cfg*.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Remove(f.Name()) })
 	f.WriteString(content)
 	f.Close()
 	return f.Name()
 }
 
 func TestLoad_Valid(t *testing.T) {
-	path := writeTemp(t, `{"format":"pretty","sample_rate":3,"sinks":[{"name":"out","target":"stdout"}],"routes":[{"sink":"out","rules":[]}]}`)
-	cfg, err := Load(path)
+	p := writeTemp(t, `{"sinks":[{"name":"out","type":"stdout"}],"routes":[{"sink":"out"}],"transformers":[{"field":"level","op":"uppercase"}]}`)
+	cfg, err := Load(p)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Format != "pretty" {
-		t.Errorf("expected format pretty, got %s", cfg.Format)
+	if len(cfg.Sinks) != 1 || cfg.Sinks[0].Name != "out" {
+		t.Error("sinks not loaded")
 	}
-	if cfg.SampleRate != 3 {
-		t.Errorf("expected sample_rate 3, got %d", cfg.SampleRate)
+	if len(cfg.Transformers) != 1 || cfg.Transformers[0].Op != "uppercase" {
+		t.Error("transformers not loaded")
 	}
 }
 
 func TestLoad_MissingFile(t *testing.T) {
-	_, err := Load("/nonexistent/path/cfg.json")
+	_, err := Load(filepath.Join(t.TempDir(), "nope.json"))
 	if err == nil {
-		t.Fatal("expected error for missing file")
+		t.Error("expected error for missing file")
 	}
 }
 
 func TestLoad_InvalidJSON(t *testing.T) {
-	path := writeTemp(t, `{bad json`)
-	_, err := Load(path)
+	p := writeTemp(t, `{bad json}`)
+	_, err := Load(p)
 	if err == nil {
-		t.Fatal("expected error for invalid JSON")
+		t.Error("expected parse error")
 	}
 }
 
 func TestLoad_UnknownSinkInRoute(t *testing.T) {
-	path := writeTemp(t, `{"sinks":[{"name":"out","target":"stdout"}],"routes":[{"sink":"missing"}]}`)
-	_, err := Load(path)
+	p := writeTemp(t, `{"sinks":[{"name":"out","type":"stdout"}],"routes":[{"sink":"missing"}]}`)
+	_, err := Load(p)
 	if err == nil {
-		t.Fatal("expected error for unknown sink in route")
+		t.Error("expected error for unknown sink")
 	}
 }
 
-func TestLoad_DefaultsApplied(t *testing.T) {
-	path := writeTemp(t, `{"sinks":[{"name":"out","target":"stdout"}],"routes":[{"sink":"out"}]}`)
-	cfg, err := Load(path)
+func TestLoad_UnknownTransformerOp(t *testing.T) {
+	p := writeTemp(t, `{"sinks":[],"routes":[],"transformers":[{"field":"x","op":"explode"}]}`)
+	_, err := Load(p)
+	if err == nil {
+		t.Error("expected error for unknown op")
+	}
+}
+
+func TestLoad_EmptyConfig(t *testing.T) {
+	p := writeTemp(t, `{}`)
+	cfg, err := Load(p)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Format != "json" {
-		t.Errorf("expected default format json, got %s", cfg.Format)
-	}
-	if cfg.SampleRate != 1 {
-		t.Errorf("expected default sample_rate 1, got %d", cfg.SampleRate)
-	}
-}
-
-func TestLoad_EmptySinks(t *testing.T) {
-	path := writeTemp(t, `{"sinks":[],"routes":[]}`)
-	_, err := Load(path)
-	if err == nil {
-		t.Fatal("expected error when no sinks are defined")
+	if len(cfg.Sinks) != 0 || len(cfg.Routes) != 0 {
+		t.Error("expected empty config")
 	}
 }

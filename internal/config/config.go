@@ -5,29 +5,27 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/user/logpipe/internal/redactor"
+	"github.com/user/logpipe/internal/transformer"
 )
 
 // SinkConfig describes an output destination.
 type SinkConfig struct {
 	Name string `json:"name"`
-	Path string `json:"path"` // "-" for stdout
+	Type string `json:"type"` // stdout, file
+	Path string `json:"path"` // for file sinks
 }
 
-// RouteConfig maps a filter set to a sink.
+// RouteConfig maps a sink name to filter rules.
 type RouteConfig struct {
-	Sink    string            `json:"sink"`
-	Filters map[string]string `json:"filters"`
+	Sink  string            `json:"sink"`
+	Rules []map[string]string `json:"rules"`
 }
 
 // Config is the top-level configuration structure.
 type Config struct {
-	Sinks     []SinkConfig      `json:"sinks"`
-	Routes    []RouteConfig     `json:"routes"`
-	Redact    []redactor.Rule   `json:"redact"`
-	Format    string            `json:"format"`
-	RateLimit int               `json:"rate_limit"`
-	SampleN   int               `json:"sample_n"`
+	Sinks        []SinkConfig         `json:"sinks"`
+	Routes       []RouteConfig        `json:"routes"`
+	Transformers []transformer.Rule   `json:"transformers"`
 }
 
 // Load reads and validates a JSON config file.
@@ -42,14 +40,18 @@ func Load(path string) (*Config, error) {
 	}
 	sinkNames := make(map[string]bool, len(cfg.Sinks))
 	for _, s := range cfg.Sinks {
-		if s.Name == "" {
-			return nil, fmt.Errorf("config: sink missing name")
-		}
 		sinkNames[s.Name] = true
 	}
 	for _, r := range cfg.Routes {
 		if !sinkNames[r.Sink] {
 			return nil, fmt.Errorf("config: route references unknown sink %q", r.Sink)
+		}
+	}
+	for _, tr := range cfg.Transformers {
+		switch tr.Op {
+		case "set", "delete", "rename", "uppercase", "lowercase":
+		default:
+			return nil, fmt.Errorf("config: unknown transformer op %q", tr.Op)
 		}
 	}
 	return &cfg, nil
