@@ -67,3 +67,11 @@ func TestLoad_DefaultsApplied(t *testing.T) {
 		t.Errorf("expected default sample_rate 1, got %d", cfg.SampleRate)
 	}
 }
+
+func TestLoad_EmptySinks(t *testing.T) {
+	path := writeTemp(t, `{"sinks":[],"routes":[]}`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error when no sinks are defined")
+	}
+}
