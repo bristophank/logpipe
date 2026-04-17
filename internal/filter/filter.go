@@ -8,7 +8,7 @@ import (
 // Rule defines a single filter condition applied to a log entry field.
 type Rule struct {
 	Field    string
-	Operator string // "eq", "contains", "exists"
+	Operator string // "eq", "contains", "exists", "not_eq"
 	Value    string
 }
 
@@ -52,6 +52,11 @@ func applyRule(rule Rule, entry map[string]interface{}) bool {
 			return false
 		}
 		return toString(val) == rule.Value
+	case "not_eq":
+		if !exists {
+			return false
+		}
+		return toString(val) != rule.Value
 	case "contains":
 		if !exists {
 			return false
