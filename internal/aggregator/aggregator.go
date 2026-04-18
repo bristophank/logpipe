@@ -61,6 +61,17 @@ func (a *Aggregator) Flush() {
 	}
 }
 
+// Counts returns a snapshot of the current aggregation counts without resetting state.
+func (a *Aggregator) Counts() map[string]int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	snap := make(map[string]int, len(a.counts))
+	for k, v := range a.counts {
+		snap[k] = v
+	}
+	return snap
+}
+
 // Stop halts the background flush goroutine.
 func (a *Aggregator) Stop() {
 	close(a.stop)
