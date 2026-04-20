@@ -2,6 +2,7 @@ package joiner
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 )
 
@@ -15,7 +16,7 @@ func Stream(j *Joiner, r io.Reader, w io.Writer) error {
 			continue
 		}
 		out, _ := j.Apply(line)
-		if _, err := io.WriteString(w, out+"\n"); err != nil {
+		if _, err := fmt.Fprintln(w, out); err != nil {
 			return err
 		}
 	}
