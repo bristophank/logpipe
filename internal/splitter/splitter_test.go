@@ -65,3 +65,24 @@ func TestWrite_MultipleRulesMatch(t *testing.T) {
 		t.Fatal("expected both sinks to receive line")
 	}
 }
+
+// TestWrite_FallbackNotWrittenOnMatch verifies that the fallback sink does not
+// receive a line when a rule matches and routes it to a named sink.
+func TestWrite_FallbackNotWrittenOnMatch(t *testing.T) {
+	errorSink := &bytes.Buffer{}
+	fallback := &bytes.Buffer{}
+	sinks := map[string]interface{ Write([]byte) (int, error) }{
+		"errors": errorSink,
+	}
+	rules := []splitter.Rule{
+		{Field: "level", Value: "error", Sink: "errors"},
+	}
+	s := splitter.New(rules, sinks, fallback)
+	_ = s.Write([]byte(`{"level":"error","msg":"boom"}`))
+	if fallback.Len() != 0 {
+		t.Fatal("expected fallback to not receive line when a rule matched")
+	}
+	if errorSink.Len() == 0 {
+		t.Fatal("expected errors sink to receive line")
+	}
+}
