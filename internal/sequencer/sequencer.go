@@ -1,80 +1,77 @@
-// Package sequencer assigns a monotonically increasing sequence number to each
-// JSON log line. This is useful for preserving ordering guarantees when logs
-// are fanned out to multiple sinks or processed concurrently.
 package sequencer
 
 import (
 	"encoding/json"
-	"sync/atomic"
+	"sync"
 )
 
-// Sequencer stamps each log line with a sequence number field.
+// Rule defines a field to add a sequence number to.
+type Rule struct {
+	Field  string // destination field name
+	Start  int    // initial value (default 0)
+	Step   int    // increment per line (default 1)
+}
+
+// Sequencer assigns monotonically increasing sequence numbers to log lines.
 type Sequencer struct {
-	field  string
-	start  int64
-	counter atomic.Int64
+	rules    []Rule
+	counters []int
+	mu       sync.Mutex
 }
 
-// Config holds options for the Sequencer.
-type Config struct {
-	// Field is the JSON key to write the sequence number into.
-	// Defaults to "seq" if empty.
-	Field string
-
-	// Start is the initial sequence value. Defaults to 1.
-	Start int64
+// New creates a Sequencer with the given rules.
+func New(rules []Rule) *Sequencer {
+	counters := make([]int, len(rules))
+	for i, r := range rules {
+		if r.Step == 0 {
+			rules[i].Step = 1
+		}
+		counters[i] = r.Start
+	}
+	return &Sequencer{rules: rules, counters: counters}
 }
 
-// New creates a Sequencer from the given Config.
-func New(cfg Config) *Sequencer {
-	field := cfg.Field
-	if field == "" {
-		field = "seq"
-	}
-	start := cfg.Start
-	if start == 0 {
-		start = 1
-	}
-	s := &Sequencer{
-		field: field,
-		start: start,
-	}
-	s.counter.Store(start)
-	return s
-}
-
-// Apply parses line as JSON, injects the next sequence number, and returns
-// the re-encoded line. If line is empty or not valid JSON the original bytes
-// are returned unchanged.
-func (s *Sequencer) Apply(line []byte) ([]byte, error) {
-	if len(line) == 0 {
+// Apply injects sequence numbers into a JSON log line.
+func (s *Sequencer) Apply(line string) (string, error) {
+	if len(s.rules) == 0 {
 		return line, nil
 	}
 
-	var obj map[string]any
-	if err := json.Unmarshal(line, &obj); err != nil {
-		// Not valid JSON — pass through without stamping.
-		return line, nil
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(line), &obj); err != nil {
+		return line, err
 	}
 
-	seq := s.counter.Add(1) - 1 // fetch-then-increment; first value == start
-	obj[s.field] = seq
+	s.mu.Lock()
+	for i, r := range s.rules {
+		obj[r.Field] = s.counters[i]
+		s.counters[i] += r.Step
+	}
+	s.mu.Unlock()
 
 	out, err := json.Marshal(obj)
 	if err != nil {
 		return line, err
 	}
-	return out, nil
+	return string(out), nil
 }
 
-// Reset sets the counter back to the configured start value. Safe for
-// concurrent use.
+// Reset resets all counters to their starting values.
 func (s *Sequencer) Reset() {
-	s.counter.Store(s.start)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, r := range s.rules {
+		s.counters[i] = r.Start
+	}
 }
 
-// Current returns the next sequence number that will be assigned without
-// advancing the counter.
-func (s *Sequencer) Current() int64 {
-	return s.counter.Load()
+// Snapshot returns the current counter values keyed by field name.
+func (s *Sequencer) Snapshot() map[string]int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]int, len(s.rules))
+	for i, r := range s.rules {
+		out[r.Field] = s.counters[i]
+	}
+	return out
 }
