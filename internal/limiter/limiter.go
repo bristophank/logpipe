@@ -28,6 +28,15 @@ func New(rules []Rule) *Limiter {
 	return &Limiter{rules: valid}
 }
 
+// Rules returns a copy of the active rules configured on the Limiter.
+func (l *Limiter) Rules() []Rule {
+	copy := make([]Rule, len(l.rules))
+	for i, r := range l.rules {
+		copy[i] = r
+	}
+	return copy
+}
+
 // Allow returns true when the line should be forwarded downstream.
 // A line is dropped (false) if any configured field's string value exceeds
 // its maximum allowed length. Non-string field values are never dropped.
